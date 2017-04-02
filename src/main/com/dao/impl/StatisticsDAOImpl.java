@@ -1,5 +1,6 @@
 package main.com.dao.impl;
 
+import java.util.Arrays;
 import java.util.Optional;
 import java.util.concurrent.DelayQueue;
 import java.util.concurrent.Delayed;
@@ -34,9 +35,9 @@ public class StatisticsDAOImpl implements StatisticsDAO {
 			public void run() {
 				while (true) {
 					try {
-						// Take elements out from the DelayQueue object.
+
 						DelayedTransactionData delayedTransactionData = delayedAdditionQueue.take();
-						logger.info(Thread.currentThread().getName() + " - Sata retrieved from addition queue...");
+						logger.info(Thread.currentThread().getName() + " - Data retrieved from addition queue...");
 
 						StatisticsDAOImpl.this.readWriteLock.writeLock().lock();
 
@@ -67,24 +68,35 @@ public class StatisticsDAOImpl implements StatisticsDAO {
 				while (true) {
 					try {
 						logger.info(Thread.currentThread().getName() + " - waiting for data in range to expire...");
-						// Take elements out from the DelayQueue object.
-						delayedRemotionQueue.take().getTransactionData();
+
+						TransactionData transactionData = delayedRemotionQueue.take().getTransactionData();
 
 						StatisticsDAOImpl.this.readWriteLock.writeLock().lock();
-						// only one writer can enter this section,
-						// and only if no threads are currently reading.
 
-						logger.info(Thread.currentThread().getName()
-								+ " - creating a new StatisticsData to recalculate the indices...");
-						StatisticsDAOImpl.this.lastStatisticData = new StatisticsData();
+						boolean isMaxAmount = StatisticsDAOImpl.this.lastStatisticData.getMax()
+								.equals(transactionData.getAmount());
+						boolean isMinAmount = StatisticsDAOImpl.this.lastStatisticData.getMin()
+								.equals(transactionData.getAmount());
 
-						// I have to iterate again since I don't have the
-						// certainty that the amount of the TransactionData that
-						// I've removed from the collection is the only
-						// repetition to be took into account for the
-						// statistics.
-						delayedRemotionQueue.stream().map(DelayedTransactionData::getTransactionData)
-								.forEach(StatisticsDAOImpl.this.lastStatisticData::addAmountFrom);
+						if (isMaxAmount || isMinAmount) {
+							logger.info(Thread.currentThread().getName()
+									+ " - creating a new StatisticsData to recalculate the indices...");
+							StatisticsDAOImpl.this.lastStatisticData = new StatisticsData();
+
+							// I have to iterate again since I don't have the
+							// certainty that the amount of the TransactionData
+							// that I've removed from the collection is the only
+							// repetition to be took into account for the Max or
+							// Min statistics, or who is next in terms of the
+							// Max or Min function.
+							delayedRemotionQueue.stream().map(DelayedTransactionData::getTransactionData)
+									.forEach(StatisticsDAOImpl.this.lastStatisticData::addAmountFrom);
+						} else {
+							logger.info(Thread.currentThread().getName()
+									+ " - Since it's an intermediate value, it's safe to remove it aritmetically with no regards for his identity...");
+							StatisticsDAOImpl.this.lastStatisticData.substractAmountFrom(transactionData);
+						}
+
 						logger.info(Thread.currentThread().getName() + " - Statistic indices recalculated!!!!");
 
 						readWriteLock.writeLock().unlock();
@@ -143,6 +155,14 @@ public class StatisticsDAOImpl implements StatisticsDAO {
 		}
 	}
 
+	/**
+	 * This class is the one that will represent the transaction data inside of
+	 * the delayed queues and facilitate the calculation of the salaries of
+	 * them.
+	 * 
+	 * @author Miguel Isasmendi
+	 *
+	 */
 	private class DelayedTransactionData implements Delayed {
 
 		private TransactionData transactionData;
